@@ -1,0 +1,62 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - lolo.zip
+      - .github/workflows/build.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract project
+        run: |
+          set -euo pipefail
+          test -f lolo.zip
+          mkdir source
+          ditto -x -k lolo.zip source
+          test -d source/lolo/ThreeOneOSFive.xcodeproj
+          chmod +x source/lolo/build_unsigned.sh
+          chmod +x source/lolo/build_esign_ready_ipa.sh
+
+      - name: Repair Xcode project paths
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          project = Path("source/lolo/ThreeOneOSFive.xcodeproj/project.pbxproj")
+          text = project.read_text()
+          for number in (6, 7, 9, 10):
+              old = f"path = ThreeOneOSFive/Patches/OGIOS File ({number}).3105;"
+              new = f'path = "ThreeOneOSFive/Patches/OGIOS File ({number}).3105";'
+              if old not in text:
+                  raise SystemExit(f"Expected invalid path not found: {old}")
+              text = text.replace(old, new)
+          project.write_text(text)
+          PY
+
+      - name: Build unsigned IPA
+        working-directory: source/lolo
+        run: ./build_unsigned.sh
+
+      - name: Verify IPA
+        working-directory: source/lolo
+        run: ./build_esign_ready_ipa.sh build/HYper-Regedit-Key-Enabled-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: HYper-Regedit-Key-Enabled-unsigned-ipa
+          path: source/lolo/build/HYper-Regedit-Key-Enabled-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
